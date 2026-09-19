@@ -6,6 +6,7 @@
 [![Hardware](https://img.shields.io/badge/Hardware-ESP32%20DevKit%20V1-E7352C?style=for-the-badge&logo=espressif&logoColor=white)](https://www.espressif.com/)
 [![Firmware](https://img.shields.io/badge/Firmware-C%2B%2B%20%2F%20Arduino-00979D?style=for-the-badge&logo=arduino&logoColor=white)](https://www.arduino.cc/)
 [![IMU Sensor](https://img.shields.io/badge/IMU-MPU6050%206--DOF-4B8BBE?style=for-the-badge)](https://invensense.tdk.com/)
+[![Barometer](https://img.shields.io/badge/Barometer-BMP280%20Altimeter-teal?style=for-the-badge)](https://www.bosch-sensortec.com/)
 [![Gas Sensor](https://img.shields.io/badge/Gas%20Sensor-MQ--2%20Spike%20Monitor-orange?style=for-the-badge)]()
 [![Display](https://img.shields.io/badge/Display-ST7735%201.8%22%20TFT-8A2BE2?style=for-the-badge)]()
 [![Actuation](https://img.shields.io/badge/Actuation-GPIO14%20Mitigation%20Driver-red?style=for-the-badge)]()
@@ -13,7 +14,7 @@
 [![Architecture](https://img.shields.io/badge/Architecture-Non--Blocking%20State%20Machine-blueviolet?style=for-the-badge)]()
 
 <p align="center">
-  <b>Autonomous Edge-Computing Safety Node with Real-Time Biomechanical & Atmospheric Threat Detection, On-Device Triage, Local Hardware Mitigation, and Zero-Latency Mobile Telemetry.</b>
+  <b>Autonomous Edge-Computing Safety Node with Real-Time Biomechanical & Atmospheric Threat Detection, Multi-Sensor Fusion Triage, Local Hardware Mitigation, and Zero-Latency Mobile Telemetry.</b>
 </p>
 
 ---
@@ -42,14 +43,15 @@ In high-hazard industrial spaces (chemical refineries, construction hubs, heavy 
 
 ## ⚡ Key Highlights
 
-- 🪂 **Physics-Based Dual-Threshold Fall & Impact Detection**: Non-blocking continuous inertial monitoring via 6-axis **MPU-6050**. Simultaneously flags sudden freefall states ($< 0.3g$) and destructive shock impacts ($> 2.8g$) via 3-axis Euclidean vector norm aggregation:
-  $$\|G\| = \sqrt{a_x^2 + a_y^2 + a_z^2}$$
+- 🪂 **Multi-Sensor Fusion Fall & Impact Detection**: Non-blocking continuous inertial monitoring via 6-axis **MPU-6050** fused with barometric elevation tracking via **BMP280**. Simultaneously flags sudden freefall states ($< 0.3g$) or destructive shock impacts ($> 2.8g$) combined with a confirmed vertical altitude drop ($\Delta h \ge 0.8\text{ m}$), eliminating false triggers from routine movements:
+  $$\|G\| = \sqrt{a_x^2 + a_y^2 + a_z^2}, \quad \Delta h = h_{\text{baseline}} - h_{\text{current}} \ge 0.8\text{ m}$$
+- 🏔️ **High-Precision Barometric Pressure & Altimetry**: Continuous ambient atmospheric pressure ($h\text{Pa}$) and dynamic relative altitude ($m$) monitoring using the **BMP280** over shared I2C (`0x76`) with 16x oversampling and IIR filtering.
 - ☣️ **Multi-Tier Toxic & Combustible Gas Triage**: Continuous atmospheric sampling via **MQ-2** sensor with ADC-based hysteresis to differentiate between ambient baseline deviations (Warning) and lethal runaway gas spikes (Emergency).
 - 🚨 **Autonomous Hardware Mitigation Actuator**: High-priority hardware driver line (`GPIO 14`) engineered to instantly engage mechanical mitigations (solenoid valves, emergency servos, harness dampers, or high-power strobes) without waiting for cloud round-trips.
-- 📺 **Onboard 1.8" ST7735 High-Contrast Color TFT HUD**: Dynamic, context-aware GUI providing instant visual triage (Safe, Warning, Critical Hazard Invert), live vector acceleration, and raw gas concentration readouts.
+- 📺 **Onboard 1.8" ST7735 High-Contrast Color TFT HUD**: Dynamic, context-aware GUI providing instant visual triage (Safe, Warning, Critical Hazard Invert), live vector acceleration, relative altitude, and raw gas concentration readouts with non-flicker background-fill refresh.
 - 🔴 **Tri-Color LED & Dual-Cadence Acoustic Siren**: Instant physical status indication (Green/Yellow/Red) accompanied by dynamic buzzer modulation (slow pulse on warning, high-frequency panic bursts on critical emergency).
 - 🆘 **Deterministic Tactile Distress Trigger**: Direct tactile push button (`GPIO 13`) with software debouncing for immediate manual SOS override.
-- 🌐 **Zero-Dependency SoftAP Web Dashboard**: Onboard captive Wi-Fi Access Point (`VanguardGuard-Node`) hosting a lightweight, dark-mode real-time responsive dashboard reachable from any smartphone, tablet, or rugged industrial terminal with zero external infrastructure.
+- 🌐 **Zero-Dependency SoftAP Web Dashboard**: Onboard captive Wi-Fi Access Point (`VanguardGuard-Node`) hosting a lightweight, dark-mode real-time responsive dashboard with one-touch alarm reset reachable from any smartphone, tablet, or rugged industrial terminal with zero external infrastructure.
 
 ---
 
@@ -59,6 +61,7 @@ In high-hazard industrial spaces (chemical refineries, construction hubs, heavy 
 flowchart TD
     subgraph SENSORS ["1. Edge Sensor Tier"]
         MPU["MPU-6050 (6-DOF IMU)<br/>I2C: SDA (GPIO 21) / SCL (GPIO 22)"]
+        BMP["BMP280 (Baro & Altimeter)<br/>I2C: Addr 0x76 (GPIO 21 / 22)"]
         MQ2["MQ-2 Gas / Smoke Sensor<br/>Analog ADC1 (GPIO 34)"]
         SOS["Tactile SOS Distress Button<br/>Digital In (GPIO 13, Pull-up)"]
     end
@@ -66,8 +69,10 @@ flowchart TD
     subgraph ENGINE ["2. Core Processing & Triage Engine (ESP32)"]
         direction TB
         POLL["Non-Blocking Polling Loop<br/>(100ms Sampling Cadence)"]
+        FUSION["Sensor Fusion Fall Engine<br/>G-Spike (>2.8g) or Freefall (<0.3g)<br/>+ Altitude Drop (>= 0.8m)"]
         STATE["Triage State Machine<br/>• NORMAL (Safe)<br/>• WARNING (Gas Elevated)<br/>• EMERGENCY (Fall / Spike / SOS)"]
-        POLL --> STATE
+        POLL --> FUSION
+        FUSION --> STATE
     end
 
     subgraph ACTUATION ["3. Local Edge Actuation"]
@@ -86,6 +91,7 @@ flowchart TD
     end
 
     MPU --> POLL
+    BMP --> POLL
     MQ2 --> POLL
     SOS --> POLL
 
@@ -117,6 +123,9 @@ The firmware is targeted for the **ESP32 DevKit V1 (30-pin / 36-pin)**. All hard
 | **MPU-6050** | `SDA` | **GPIO 21** | I2C Data | Default ESP32 I2C Data Bus |
 | **MPU-6050** | `SCL` | **GPIO 22** | I2C Clock | Default ESP32 I2C Clock Bus |
 | **MPU-6050** | `VCC / GND` | **3.3V / GND** | Power | Accelerometer/Gyroscope Bus Power |
+| **BMP280** | `SDA` | **GPIO 21** | I2C Data | Shared ESP32 I2C Data Bus (Address `0x76`) |
+| **BMP280** | `SCL` | **GPIO 22** | I2C Clock | Shared ESP32 I2C Clock Bus (Address `0x76`) |
+| **BMP280** | `VCC / GND` | **3.3V / GND** | Power | High-Precision Altimeter & Barometer Power |
 | **MQ-2 Sensor** | `AOUT` | **GPIO 34** | Analog In | ADC1 Channel 6 (No Wi-Fi ADC conflict) |
 | **MQ-2 Sensor** | `VCC / GND` | **5.0V / GND** | Power | Sensor Heater Requires Stable 5V Rail |
 | **SOS Button** | Signal | **GPIO 13** | Input Pull-Up | Active LOW tactile panic push button |
@@ -137,9 +146,9 @@ BARNSTROMZ operates on a prioritized finite state machine (FSM) evaluated cyclic
 
 | State | Activation Trigger(s) | TFT Visual HUD | Tri-Color LED | Acoustic Buzzer | Mitigation Actuator (`GPIO 14`) | Web Server Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`STATE_NORMAL`** | • Ambient Gas $< 1000$ ADC<br>• $0.3g \le G \le 2.8g$<br>• SOS Button Idle | Dark theme, blue banner, green **SAFE** status, live telemetry | 🟢 **GREEN ON**<br>🟡 Yellow OFF<br>🔴 Red OFF | **SILENT** (LOW) | **DEASSERTED** (LOW) | `NORMAL` (Green badge) |
+| **`STATE_NORMAL`** | • Ambient Gas $< 1000$ ADC<br>• $0.3g \le G \le 2.8g$<br>• Altitude Drop $< 0.8\text{ m}$<br>• SOS Button Idle | Dark theme, blue banner, green **SAFE** status, live telemetry | 🟢 **GREEN ON**<br>🟡 Yellow OFF<br>🔴 Red OFF | **SILENT** (LOW) | **DEASSERTED** (LOW) | `NORMAL` (Green badge) |
 | **`STATE_WARNING`** | • Gas ADC $\ge 1000$ and $< 1800$ | Amber banner, yellow **WARNING** status, live gas telemetry | 🟢 Green OFF<br>🟡 **YELLOW ON**<br>🔴 Red OFF | **SLOW PULSE** (500ms toggle cadence) | **DEASSERTED** (LOW) | `WARNING` (Orange badge) |
-| **`STATE_EMERGENCY`** | • Freefall ($G < 0.3g$)<br>• Hard Impact ($G > 2.8g$)<br>• Lethal Gas Spike ($\ge 1800$)<br>• Manual SOS Pressed | Inverted **RED SCREEN**, alert title, hazard label, **MITIGATION ACTIVE** badge | 🟢 Green OFF<br>🟡 Yellow OFF<br>🔴 **RED ON** | **RAPID ALARM** (100ms strobe cadence) | **ACTIVE HIGH** (Automated hardware intervention) | `CRITICAL EMERGENCY` (Flashing red badge) |
+| **`STATE_EMERGENCY`** | • **Fall Detected**: ($G < 0.3g$ or $G > 2.8g$) **AND** $\Delta h \ge 0.8\text{ m}$<br>• Lethal Gas Spike ($\ge 1800$)<br>• Manual SOS Pressed | Inverted **RED SCREEN**, alert title, hazard label, **MITIGATION ACTIVE** badge | 🟢 Green OFF<br>🟡 Yellow OFF<br>🔴 **RED ON** | **RAPID ALARM** (100ms strobe cadence) | **ACTIVE HIGH** (Automated hardware intervention) | `CRITICAL EMERGENCY` (Flashing red badge) |
 
 ---
 
@@ -154,9 +163,11 @@ When seconds count, safety managers and first responders can connect to the work
                   │ ─────────────────────────────────────── │
                   │     STATUS: CRITICAL EMERGENCY          │
                   │ ─────────────────────────────────────── │
-                  │  G-Force:       3.12 g                  │
-                  │  Gas ADC Level: 2140                    │
-                  │  Active Hazard: FALL DETECTED!          │
+                  │  G-Force Vector: 3.12 g                 │
+                  │  Altitude:       -1.4 m                 │
+                  │  Baro Pressure:  1011.2 hPa             │
+                  │  Gas ADC Level:  2140                   │
+                  │  Active Hazard:  FALL DETECTED!         │
                   │                                         │
                   │          [ CLEAR ALARM / RESET ]        │
                   └─────────────────────────────────────────┘
@@ -173,7 +184,7 @@ When seconds count, safety managers and first responders can connect to the work
    http://192.168.4.1
    ```
 5. The dashboard auto-updates every **3 seconds** using non-intrusive HTTP refresh headers.
-6. Once the area or worker is secured, operators can click **CLEAR ALARM** (`/reset`) to return the wearable to `STATE_NORMAL`.
+6. Once the area or worker is secured, operators can click **CLEAR ALARM** (`/reset`) to recalibrate baseline altitude and return the wearable to `STATE_NORMAL`.
 
 ---
 
@@ -197,7 +208,9 @@ The firmware is designed with an **asynchronous non-blocking architecture** usin
                  • DigitalRead SOS Pin                  • Refresh LED States
                  • Fetch MPU6050 Acceleration           • Modulate Buzzer Cadence
                  • Calculate Euclidean Norm G           • Assert/Deassert GPIO 14
-                 • Read MQ-2 Analog Channel             • Render ST7735 TFT GUI
+                 • Fetch BMP280 Baro & Altitude         • Render ST7735 TFT GUI
+                 • Verify Altitude Drop (>= 0.8m)
+                 • Read MQ-2 Analog Channel
                  • Transition State Machine
 ```
 
@@ -214,6 +227,7 @@ Traditional Arduino sample code heavily uses `delay()`, which halts the CPU for 
 ### 1. Hardware Requirements
 - 1x ESP32 DevKit V1 (30-pin or 36-pin)
 - 1x MPU-6050 6-Axis Accelerometer / Gyroscope Module
+- 1x BMP280 High-Precision Barometric Pressure & Altimeter Module (I2C `0x76`)
 - 1x MQ-2 Flammable Gas & Smoke Sensor Module
 - 1x 1.8" ST7735 128x160 SPI TFT Display
 - 1x 5V Active Buzzer
@@ -230,6 +244,7 @@ Install the latest [Arduino IDE](https://www.arduino.cc/en/software) or Platform
 | **Adafruit ST7735 and ST7789 Library** | Adafruit | 1.8" Color TFT SPI Driver |
 | **Adafruit GFX Library** | Adafruit | Graphics primitive core |
 | **Adafruit MPU6050** | Adafruit | 6-DOF IMU Sensor Interface |
+| **Adafruit BMP280 Library** | Adafruit | Barometric Pressure & Altitude Sensor Interface |
 | **Adafruit Unified Sensor** | Adafruit | Sensor abstraction layer |
 | **WiFi** & **WebServer** | Built-in ESP32 | On-chip Access Point & HTTP Server |
 
@@ -245,7 +260,7 @@ In the Arduino IDE:
 
 ### 4. Upload & Verify
 1. Wire the peripherals according to the [Hardware Pinout Table](#-hardware-pinout--schematics).
-2. Open the project firmware (`barnstromz.txt` / `barnstromz.ino`).
+2. Open the project firmware (`barnstromz.ino` / `barnstromz.txt`).
 3. Press **Upload**.
 4. Open the Serial Monitor at **115200 baud** to view real-time initialization and AP IP assignment:
    ```text
@@ -263,10 +278,11 @@ In the Arduino IDE:
   #define GAS_WARN_THRESH   1000   // Raw ADC warning level
   #define GAS_ALARM_THRESH  1800   // Raw ADC dangerous level
   ```
-- **Fall Sensitivity**: The impact spike threshold can be calibrated between $2.5g$ and $3.5g$ depending on whether the wearable is mounted on a hard-hat, chest harness, or utility belt:
+- **Sensor Fusion Fall Sensitivity**: Calibrate the $G$-force triggers and altitude drop validation threshold:
   ```cpp
-  #define FALL_HIGH_G       2.8    // Spike impact (g)
-  #define FALL_LOW_G        0.3    // Freefall weightlessness (g)
+  #define FALL_HIGH_G       2.8    // Spike impact threshold (g)
+  #define FALL_LOW_G        0.3    // Freefall weightlessness threshold (g)
+  #define ALTITUDE_DROP_MIN 0.8    // Minimum altitude drop in meters (80cm) to confirm fall
   ```
 
 ---
@@ -291,4 +307,3 @@ In the Arduino IDE:
   <b>VanguardGuard // Protecting the frontline of Industry 6.0</b><br>
   <sub>Licensed under the MIT License • 2026</sub>
 </div>
-
